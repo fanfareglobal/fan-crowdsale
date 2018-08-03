@@ -1,6 +1,7 @@
 pragma solidity ^0.4.24;
 
 import './FAN.sol';
+import './Withdrawable';
 import "openzeppelin-solidity/contracts/math/SafeMath.sol";
 import "openzeppelin-solidity/contracts/AddressUtils.sol";
 import 'openzeppelin-solidity/contracts/lifecycle/Pausable.sol';
@@ -8,12 +9,12 @@ import 'openzeppelin-solidity/contracts/ownership/Ownable.sol';
 import 'openzeppelin-solidity/contracts/access/Whitelist.sol';
 
 
-contract FanCrowdsale is Ownable, Pausable, Whitelist {
+contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
   using SafeMath for uint256;
   using AddressUtils for address;
 
   // helper with wei
-  uint256 Coin = 1000000000000000000;
+  const uint256 Coin = 1 ether;
 
   // token
   FAN public token;
@@ -28,10 +29,10 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist {
     uint rate;
   }
 
-  uint public currentStage;
-  uint public currentRate;
-  mapping (uint => Stage) stages;
-  uint public totalStages; //stages count
+  uint8 public currentStage;
+  uint256 public currentRate;
+  mapping (uint8 => Stage) public stages;
+  uint8 public totalStages; //stages count
   // =============
 
   // Amount raised
@@ -75,8 +76,7 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist {
   // Token Cap/Goal
   // =============================
   uint256 public totalTokensForSale; // = 424000000 * Coin; // tokens be sold in Crowdsale
-  uint256 public capInWei;    // hard cap
-  uint256 public goalInWei;   // min wei to raise, otherwise trigger refund when closed
+  uint256 public goalInToken;        // min token to sale
   // ==============================
 
   // Finalize
@@ -125,8 +125,8 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist {
     openingTime = _startTime;
     closingTime = _endTime;
 
-    capInWei  = _cap;
-    goalInWei = 0; // we don't need that feature, so give it 0 to override
+    totalTokensForSale  = _cap;
+    goalInToken = 0; // we don't need that feature, so give it 0 to override
 
     initStages();
     setCrowdsaleStage(0);
@@ -137,7 +137,7 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist {
   // =========================================================
 
   // Change Crowdsale Stage. Available Options: 0..4
-  function setCrowdsaleStage(uint _stageId) public onlyOwner {
+  function setCrowdsaleStage(uint8 _stageId) public onlyOwner {
     require(_stageId >= 0);
     require(totalStages > _stageId);
 
@@ -394,10 +394,8 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist {
    * determine whether to refund
    */
   function _finalization() internal {
-    // success
-    if (totalWeiRaised > goalInWei) {
-
-    } else {
+    // goal not reached
+    if (totalTokensSold < goalInToken) {
       // we do refund
       _refund();
     }
