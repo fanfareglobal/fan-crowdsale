@@ -189,9 +189,9 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
     uint256 acceptedWei;
 
     // if exceed totalTokensForSale
-    if (totalTokensSold + tokensToMint > totalTokensForSale) {
+    if (totalTokensSold.add(tokensToMint) > totalTokensForSale) {
       // accept partial
-      saleableTokens = totalTokensForSale - totalTokensSold;
+      saleableTokens = totalTokensForSale.sub(totalTokensSold);
       acceptedWei = saleableTokens.div(currentRate);
 
       _buyTokens(msg.sender, acceptedWei);
@@ -201,8 +201,8 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
       emit EthRefunded("Exceed Total Token Distributed");
     } else {
       // cross two stages
-      if (currentStageTokensSold + tokensToMint > stages[currentStage].tokenAllocated) {
-        saleableTokens = stages[currentStage].tokenAllocated - currentStageTokensSold;
+      if (currentStageTokensSold.add(tokensToMint) > stages[currentStage].tokenAllocated) {
+        saleableTokens = stages[currentStage].tokenAllocated.sub(currentStageTokensSold);
         acceptedWei = saleableTokens.div(currentRate);
 
         // buy first stage partial
