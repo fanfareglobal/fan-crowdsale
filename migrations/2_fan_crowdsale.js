@@ -39,8 +39,8 @@ function deployOnMainnet(deployer){
 
 // deploy on local ganache private net
 function deployOnLocal(deployer){
-  // now + 10s
-  const startTime = Math.round((new Date(Date.now() + 10000).getTime())/1000);
+  // now + 1ms
+  const startTime = Math.round((new Date(Date.now() + 1).getTime())/1000);
   // tomorrow
   const endTime = Math.round((new Date(Date.now() + 86400000).getTime())/1000);
 

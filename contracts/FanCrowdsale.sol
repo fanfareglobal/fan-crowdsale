@@ -1,7 +1,7 @@
 pragma solidity ^0.4.24;
 
 import './FAN.sol';
-import './Withdrawable';
+import './Withdrawable.sol';
 import "openzeppelin-solidity/contracts/math/SafeMath.sol";
 import "openzeppelin-solidity/contracts/AddressUtils.sol";
 import 'openzeppelin-solidity/contracts/lifecycle/Pausable.sol';
@@ -14,7 +14,7 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
   using AddressUtils for address;
 
   // helper with wei
-  const uint256 Coin = 1 ether;
+  uint256 constant Coin = 1 ether;
 
   // token
   FAN public token;
@@ -85,6 +85,8 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
   event Finalized();
   // ==============================
 
+  event DLog(uint num);
+
 
   // Constructor
   // ============
@@ -128,16 +130,15 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
     totalTokensForSale  = _cap;
     goalInToken = 0; // we don't need that feature, so give it 0 to override
 
-    initStages();
-    setCrowdsaleStage(0);
+    _initStages();
+    _setCrowdsaleStage(0);
   }
   // =============
 
   // Crowdsale Stage Management
   // =========================================================
-
   // Change Crowdsale Stage. Available Options: 0..4
-  function setCrowdsaleStage(uint8 _stageId) public onlyOwner {
+  function _setCrowdsaleStage(uint8 _stageId) internal {
     require(_stageId >= 0);
     require(totalStages > _stageId);
 
@@ -148,7 +149,7 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
     currentStageTokensSold = 0;
   }
 
-  function initStages() internal {
+  function _initStages() internal {
     // production setting
     // stages[0] = Stage(25000000 * Coin, 12500 * Coin);
     // stages[1] = Stage(46000000 * Coin, 11500 * Coin);
@@ -157,7 +158,7 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
     // stages[4] = Stage(160000000 * Coin, 10000 * Coin);
 
     // development setting
-    // 0.1 ETH per stage
+    // 0.1 ETH allocation per stage for faster forward test
     stages[0] = Stage(1250 * Coin, 12500 * Coin);
     stages[1] = Stage(1150 * Coin, 11500 * Coin);
     stages[2] = Stage(1100 * Coin, 11000 * Coin);
@@ -175,14 +176,15 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
    * @dev crowdsale must be open and we do not accept contribution sent from contract
    * because we credit tokens back it might trigger problem, eg, from exchange withdraw contract
    */
-  function () external payable whenNotPaused onlyWhileOpen{
-    require(!hasClosed());
-    require(msg.sender != address(0));
-    require(!msg.sender.isContract());
+  function contribute(address _buyer, uint256 _weiAmount) public payable whenNotPaused onlyWhileOpen {
+    require(_buyer != address(0));
+    require(!_buyer.isContract());
     // double check not to over sell
-    require(totalTokensSold <= totalTokensForSale);
+    require(totalTokensSold < totalTokensForSale);
 
-    uint256 tokensToMint = _getTokenAmount(msg.value);
+    uint256 tokensToMint = _getTokenAmount(_weiAmount);
+
+    emit DLog(_weiAmount);
 
     // temp var
     uint256 saleableTokens;
@@ -192,29 +194,36 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
     if (totalTokensSold.add(tokensToMint) > totalTokensForSale) {
       // accept partial
       saleableTokens = totalTokensForSale.sub(totalTokensSold);
-      acceptedWei = saleableTokens.div(currentRate);
+      acceptedWei = saleableTokens.mul(Coin).div(currentRate);
 
-      _buyTokens(msg.sender, acceptedWei);
+      _buyTokens(_buyer, acceptedWei);
 
       // return the excess
-      msg.sender.transfer(msg.value.sub(acceptedWei));
+      _buyer.transfer(_weiAmount.sub(acceptedWei));
       emit EthRefunded("Exceed Total Token Distributed");
     } else {
       // cross two stages
       if (currentStageTokensSold.add(tokensToMint) > stages[currentStage].tokenAllocated) {
         saleableTokens = stages[currentStage].tokenAllocated.sub(currentStageTokensSold);
-        acceptedWei = saleableTokens.div(currentRate);
+        acceptedWei = saleableTokens.mul(Coin).div(currentRate);
+        emit DLog(acceptedWei);
 
         // buy first stage partial
-        _buyTokens(msg.sender, acceptedWei);
+        _buyTokens(_buyer, acceptedWei);
 
         // buy next stage for the rest
-        _buyTokens(msg.sender, msg.value.sub(acceptedWei));
+        // _buyTokens(_buyer, _weiAmount.sub(acceptedWei));
+        contribute(_buyer, _weiAmount.sub(acceptedWei));
       } else {
         // normal situation
-        _buyTokens(msg.sender, msg.value);
+        _buyTokens(_buyer, _weiAmount);
       }
     }
+  }
+
+  // fallback
+  function () external payable {
+    contribute(msg.sender, msg.value);
   }
 
   /**
@@ -229,10 +238,7 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
   /**
    * @dev extend closing time to a future time
    */
-  function extendClosingTime(uint256 _extendToTime) public onlyOwner {
-    require(_extendToTime > closingTime);
-    require(!hasClosed());
-
+  function extendClosingTime(uint256 _extendToTime) public onlyOwner onlyWhileOpen {
     closingTime = _extendToTime;
   }
 
@@ -281,11 +287,11 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
       tokens
     );
 
-    // update stage stage etc
+    // // update stage stage etc
     _updatePurchasingState(buyer, weiAmount);
 
-    // move ether to foundation wallet
-    _forwardFunds();
+    // // move ether to foundation wallet
+    _forwardFunds(weiAmount);
 
     // check after state
     _postValidatePurchase(buyer, weiAmount);
@@ -301,7 +307,7 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
     uint256 _weiAmount
   )
     onlyIfWhitelisted(_beneficiary)
-    internal
+    view internal
   {
     require(_beneficiary != address(0));
     require(_weiAmount != 0);
@@ -316,7 +322,7 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
     address _beneficiary,
     uint256 _weiAmount
   )
-    internal
+    view internal
   {
     // optional override
   }
@@ -332,7 +338,6 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
   )
     internal
   {
-    // TODO: mint tokens
     // token.safeTransfer(_beneficiary, _tokenAmount);
     token.mint(_beneficiary, _tokenAmount);
   }
@@ -360,13 +365,11 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
     address _beneficiary,
     uint256 _weiAmount
   )
+    onlyWhileOpen
     internal
   {
-    if (totalTokensSold >= totalTokensForSale) {
-      //crowdsale succeeded
-      // totalTokensSold = totalTokensForSale;
-    } else if (currentStageTokensSold >= stages[currentStage].tokenAllocated) {
-      setCrowdsaleStage(currentStage + 1);
+    if (currentStageTokensSold >= stages[currentStage].tokenAllocated) {
+      _setCrowdsaleStage(currentStage + 1);
     }
   }
 
@@ -378,14 +381,14 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
   function _getTokenAmount(uint256 _weiAmount)
     internal view returns (uint256)
   {
-    return _weiAmount.mul(currentRate);
+    return _weiAmount.mul(currentRate).div(Coin);
   }
 
   /**
    * @dev forward raised eth to wallet
    */
-  function _forwardFunds() internal {
-    wallet.transfer(msg.value);
+  function _forwardFunds(uint _weiAmount) internal {
+    wallet.transfer(_weiAmount);
     emit EthTransferred("forwarding funds to wallet");
   }
 

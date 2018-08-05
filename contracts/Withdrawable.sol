@@ -1,5 +1,8 @@
 pragma solidity ^0.4.24;
 
+import 'openzeppelin-solidity/contracts/ownership/Ownable.sol';
+import 'openzeppelin-solidity/contracts/token/ERC20/ERC20.sol';
+
 /**
  * @title Withdrawable
  * @dev Allow contract owner to withdrow Ether or ERC20 token from contract.
