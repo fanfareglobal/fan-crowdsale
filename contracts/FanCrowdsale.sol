@@ -33,6 +33,7 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
   uint256 public currentRate;
   mapping (uint8 => Stage) public stages;
   uint8 public totalStages; //stages count
+  event StageUp(uint8 stageId);
   // =============
 
   // Amount raised
@@ -85,7 +86,8 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
   event Finalized();
   // ==============================
 
-  event DLog(uint num);
+  // debug log event
+  event DLog(uint num, string msg);
 
 
   // Constructor
@@ -111,7 +113,7 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
     require(_token != address(0), "token is not deployed?");
     require(_goal <= _cap, "cap must be greater than goal");
     require(_goal >= 0, "must have a non-negative goal");
-    // require(_startTime > block.timestamp, "startTime must be in future");
+    require(_startTime > block.timestamp, "startTime must be in future");
     require(_endTime > _startTime, "endTime must be greater than startTime");
 
     // make sure this crowdsale contract has ability to mint
@@ -139,14 +141,15 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
   // =========================================================
   // Change Crowdsale Stage. Available Options: 0..4
   function _setCrowdsaleStage(uint8 _stageId) internal {
-    require(_stageId >= 0);
-    require(totalStages > _stageId);
+    require(_stageId >= 0 && _stageId < totalStages);
 
     currentStage = _stageId;
-    currentRate = stages[_stageId].rate;
+    currentRate  = stages[_stageId].rate;
 
-    currentStageWeiRaised = 0;
+    currentStageWeiRaised  = 0;
     currentStageTokensSold = 0;
+
+    emit StageUp(_stageId);
   }
 
   function _initStages() internal {
@@ -177,46 +180,53 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
    * because we credit tokens back it might trigger problem, eg, from exchange withdraw contract
    */
   function contribute(address _buyer, uint256 _weiAmount) public payable whenNotPaused onlyWhileOpen {
+    // emit DLog(_weiAmount, 'contribute');
+    // emit DLog(currentStage, 'currentStage');
+    // emit DLog(currentStageTokensSold, 'currentStageTokensSold');
+
     require(_buyer != address(0));
     require(!_buyer.isContract());
     // double check not to over sell
     require(totalTokensSold < totalTokensForSale);
 
-    uint256 tokensToMint = _getTokenAmount(_weiAmount);
+    uint256 tokensToMint   = _getTokenAmount(_weiAmount);
 
-    emit DLog(_weiAmount);
+    // emit DLog(tokensToMint, 'tokensToMint');
+    // emit DLog(totalTokensSold.add(tokensToMint), 'tokensToBeSold');
 
     // temp var
     uint256 saleableTokens;
     uint256 acceptedWei;
 
-    // if exceed totalTokensForSale
-    if (totalTokensSold.add(tokensToMint) > totalTokensForSale) {
-      // accept partial
-      saleableTokens = totalTokensForSale.sub(totalTokensSold);
+    // refund excess
+    if (currentStage == totalStages - 1 && totalTokensSold.add(tokensToMint) > totalTokensForSale) {
+      saleableTokens = totalTokensForSale - totalTokensSold;
       acceptedWei = saleableTokens.mul(Coin).div(currentRate);
 
+      // emit DLog(saleableTokens, 'last saleableTokens');
+      // emit DLog(acceptedWei, 'last acceptedWei');
+
+      // // buy first stage partial
       _buyTokens(_buyer, acceptedWei);
 
-      // return the excess
+      // // return the excess
       _buyer.transfer(_weiAmount.sub(acceptedWei));
-      emit EthRefunded("Exceed Total Token Distributed");
+      emit EthRefunded("Exceed Total Token Distributed: Refund");
     } else {
-      // cross two stages
-      if (currentStageTokensSold.add(tokensToMint) > stages[currentStage].tokenAllocated) {
+      // normal buy
+      if (currentStageTokensSold.add(tokensToMint) <= stages[currentStage].tokenAllocated) {
+        _buyTokens(_buyer, _weiAmount);
+      } else {
+        // cross stage yet within cap
         saleableTokens = stages[currentStage].tokenAllocated.sub(currentStageTokensSold);
         acceptedWei = saleableTokens.mul(Coin).div(currentRate);
-        emit DLog(acceptedWei);
+        // emit DLog(acceptedWei, 'acceptedWei');
 
         // buy first stage partial
         _buyTokens(_buyer, acceptedWei);
 
-        // buy next stage for the rest
-        // _buyTokens(_buyer, _weiAmount.sub(acceptedWei));
+        // // buy next stage for the rest
         contribute(_buyer, _weiAmount.sub(acceptedWei));
-      } else {
-        // normal situation
-        _buyTokens(_buyer, _weiAmount);
       }
     }
   }
@@ -251,7 +261,8 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
     require(!isFinalized);
     require(hasClosed());
 
-    _finalization();
+    // goal will be always reached, skip finalization procedure
+    // _finalization();
     emit Finalized();
 
     isFinalized = true;
@@ -269,6 +280,7 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
    * @param weiAmount Value in wei involved in the purchase
    */
   function _buyTokens(address buyer, uint weiAmount) internal {
+    // emit DLog(weiAmount, '_buyTokens');
     _preValidatePurchase(buyer, weiAmount);
 
     uint256 tokens = _getTokenAmount(weiAmount);
@@ -288,13 +300,17 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
     );
 
     // // update stage stage etc
-    _updatePurchasingState(buyer, weiAmount);
+    // _updatePurchasingState(buyer, weiAmount);
+    _updatePurchasingState();
+
+    // emit DLog(currentStageTokensSold, 'currentStageTokensSold');
+    // emit DLog(stages[currentStage].tokenAllocated, 'currentStageTokenAllocated');
 
     // // move ether to foundation wallet
     _forwardFunds(weiAmount);
 
     // check after state
-    _postValidatePurchase(buyer, weiAmount);
+    // _postValidatePurchase(buyer, weiAmount);
   }
 
   /**
@@ -318,14 +334,14 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
    * @param _beneficiary Address performing the token purchase
    * @param _weiAmount Value in wei involved in the purchase
    */
-  function _postValidatePurchase(
-    address _beneficiary,
-    uint256 _weiAmount
-  )
-    view internal
-  {
-    // optional override
-  }
+  // function _postValidatePurchase(
+  //   address _beneficiary,
+  //   uint256 _weiAmount
+  // )
+  //   view internal
+  // {
+  //   return true;
+  // }
 
   /**
    * @dev Source of tokens. Override this method to modify the way in which the crowdsale ultimately gets and sends its tokens.
@@ -358,17 +374,16 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
 
   /**
    * @dev Override for extensions that require an internal state to check for validity (current user contributions, etc.)
-   * @param _beneficiary Address receiving the tokens
-   * @param _weiAmount Value in wei involved in the purchase
+   * @ param _beneficiary Address receiving the tokens
+   * @ param _weiAmount Value in wei involved in the purchase
    */
   function _updatePurchasingState(
-    address _beneficiary,
-    uint256 _weiAmount
+    // address _beneficiary,
+    // uint256 _weiAmount
   )
-    onlyWhileOpen
     internal
   {
-    if (currentStageTokensSold >= stages[currentStage].tokenAllocated) {
+    if (currentStageTokensSold >= stages[currentStage].tokenAllocated && currentStage + 1 < totalStages) {
       _setCrowdsaleStage(currentStage + 1);
     }
   }
@@ -396,18 +411,18 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
    * @dev perform finalization work, check if crowdsale is successful or not to
    * determine whether to refund
    */
-  function _finalization() internal {
-    // goal not reached
-    if (totalTokensSold < goalInToken) {
-      // we do refund
-      _refund();
-    }
-  }
+  // function _finalization() internal {
+  //   // goal not reached
+  //   if (totalTokensSold < goalInToken) {
+  //     // we do refund
+  //     _refund();
+  //   }
+  // }
 
   /**
    * @dev refund raised eth to contributors
    */
-  function _refund() internal {
-    // TODO: to be implemented
-  }
+  // function _refund() internal {
+  //   // TODO: to be implemented
+  // }
 }

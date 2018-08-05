@@ -10,6 +10,8 @@ contract('FanCrowdsale', function(accounts) {
 
   let whitelistedInvestor = accounts[1];
   let foreignInvestor = accounts[2];
+  // console.log("whitelisted Investor", whitelistedInvestor);
+  // console.log("foreignInvestor", foreignInvestor);
 
   beforeEach('Setup', async function() {
     // tokenInstance = await FanToken.deployed();
@@ -18,12 +20,12 @@ contract('FanCrowdsale', function(accounts) {
 
     // give crowdsale minting permission to token contract
     let tokenOwner = await token.owner.call();
-    console.log("crowdsale contract address: " + instance.address);
-    console.log("token contract address: " + token.address);
-    console.log("token owner", tokenOwner);
+    // console.log("crowdsale contract address: " + instance.address);
+    // console.log("token contract address: " + token.address);
+    // console.log("token owner", tokenOwner);
     if (tokenOwner != instance.address) {
       await token.transferOwnership(instance.address);
-      console.log('change owner: ', instance.address);
+      // console.log('change owner: ', instance.address);
     }
 
     return true
@@ -100,19 +102,26 @@ contract('FanCrowdsale', function(accounts) {
     let startFoundationEthBalance = await web3.eth.getBalance(foundationWallet);
 
     // contribute 0.4
-    let tx = await instance.sendTransaction({ from: whitelistedInvestor, value: web3.toWei(0.4, "ether")});
+    let receipt = await instance.sendTransaction({ from: whitelistedInvestor, value: web3.toWei(0.4, "ether")});
 
     // should receive 3955 token
     let tokenAmount = await token.balanceOf(whitelistedInvestor);
     let tokenIncrease = tokenAmount - startTokenBalance;
-    console.log(tokenAmount,'tokenAmount');
-    console.log(startTokenBalance, 'startTokenBalance');
-    console.log(tokenIncrease, 'tokenIncrease');
-    // assert.equal(tokenIncrease, 3955 * Coin, 'The sender didn\'t receive the tokens as per stage0 rate');
+    assert.equal(tokenIncrease, 3955 * Coin, 'The sender didn\'t receive the tokens as per stage0 rate');
 
     // 0.03 should refund
     let endEthBalance = await web3.eth.getBalance(whitelistedInvestor);
-    let ethSpent = endEthBalance - startEthBalance;
+    let tx = await web3.eth.getTransaction(receipt.tx);
+    // console.log('receipt', receipt);
+    // console.log('gasPrice', tx.gasPrice);
+    // console.log('gasUsed', receipt.receipt.gasUsed);
+    let fee = tx.gasPrice.mul(receipt.receipt.gasUsed);
+    // console.log('fee', fee);
+
+    let ethSpent = startEthBalance - endEthBalance - fee;
+    // console.log('starting balance: ', startEthBalance);
+    // console.log('ending balance: ', endEthBalance);
+    // console.log('spent', ethSpent);
     assert.equal(ethSpent, 0.37 * Coin, "contributor should only spent 0.37 eth");
 
     // foundation should receive 0.37
@@ -120,9 +129,18 @@ contract('FanCrowdsale', function(accounts) {
     let ethIncrease = endFoundationEthBalance - startFoundationEthBalance;
     assert.equal(ethIncrease, 0.37 * Coin, "foundation wallet should receive 0.37 eth");
 
-    // crowdsale should finish
-    // TODO: check contract is finished
+    // crowdsale should finish and reject new contribution
+    await expectThrow(instance.sendTransaction({from: whitelistedInvestor, value: web3.toWei(0.01, "ether")}));
   })
   //*/
+
+  it('finalize', async function(){
+    let isFinalized = await instance.isFinalized.call();
+    assert.isFalse(isFinalized, 'should not be finalized');
+
+    await instance.finalize();
+    isFinalized = await instance.isFinalized.call();
+    assert.isTrue(isFinalized, 'should be finalized');
+  })
 
 });
