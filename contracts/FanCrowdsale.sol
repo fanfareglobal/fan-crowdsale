@@ -113,7 +113,7 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
     require(_token != address(0), "token is not deployed?");
     require(_goal <= _cap, "cap must be greater than goal");
     require(_goal >= 0, "must have a non-negative goal");
-    require(_startTime > block.timestamp, "startTime must be in future");
+    // require(_startTime > block.timestamp, "startTime must be in future");
     require(_endTime > _startTime, "endTime must be greater than startTime");
 
     // make sure this crowdsale contract has ability to mint

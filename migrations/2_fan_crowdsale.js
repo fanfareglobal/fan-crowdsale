@@ -58,8 +58,8 @@ function deployOnLocal(deployer){
 
 // rinkeby testnet
 function deployOnRinkeby(deployer){
-  // now + 10s
-  const startTime = Math.round((new Date(Date.now() + 10000).getTime())/1000);
+  // now + 5m (depending on network condition, might give it more time for deployment)
+  const startTime = Math.round((new Date(Date.now() + 300000).getTime())/1000);
   // 7 days
   const endTime = Math.round((new Date(Date.now() + 86400000 * 7).getTime())/1000);
 
