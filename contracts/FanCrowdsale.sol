@@ -104,19 +104,28 @@ contract FanCrowdsale is Pausable {
 
   // fallback
   function () external payable {
-    contribute(msg.sender, msg.value);
+    purchase(msg.sender);
+  }
+
+  function purchase(address _buyer) public payable whenNotPaused onlyWhileOpen {
+    contribute(_buyer, msg.value);
   }
   
   // Token Purchase
   // =========================
+
   /**
    * @dev crowdsale must be open and we do not accept contribution sent from contract
    * because we credit tokens back it might trigger problem, eg, from exchange withdraw contract
    */
-  function contribute(address _buyer, uint256 _weiAmount) public payable whenNotPaused onlyWhileOpen {
+  function contribute(address _buyer, uint256 _weiAmount) internal {
     require(_buyer != address(0));
     require(!_buyer.isContract());
     require(whitelist.whitelist(_buyer));
+
+    if (_weiAmount == 0) {
+      return;
+    }
 
     // double check not to over sell
     require(totalTokensSold < totalTokensForSale);
@@ -153,7 +162,10 @@ contract FanCrowdsale is Pausable {
       }
 
       // buy next stage for the rest
-      contribute(_buyer, _weiAmount.sub(acceptedWei));
+      if ( _weiAmount.sub(acceptedWei) > 0)
+      {
+        contribute(_buyer, _weiAmount.sub(acceptedWei));
+      }
     }
   }
 
@@ -234,10 +246,6 @@ contract FanCrowdsale is Pausable {
    * @param _weiAmount Value in wei involved in the purchase
    */
   function _buyTokensInCurrentStage(address _buyer, uint _weiAmount, uint _tokenAmount) internal {
-    // emit DLog(weiAmount, '_buyTokens');
-    require(_buyer != address(0));
-    require(_weiAmount != 0);
-
     totalWeiRaised = totalWeiRaised.add(_weiAmount);
     totalTokensSold = totalTokensSold.add(_tokenAmount);
 
