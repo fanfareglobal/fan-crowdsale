@@ -1,15 +1,14 @@
 pragma solidity ^0.4.24;
 
-import './FAN.sol';
-import './Withdrawable.sol';
+import './MintableERC20.sol';
+import 'openzeppelin-solidity/contracts/token/ERC20/ERC20.sol';
 import "openzeppelin-solidity/contracts/math/SafeMath.sol";
 import "openzeppelin-solidity/contracts/AddressUtils.sol";
 import 'openzeppelin-solidity/contracts/lifecycle/Pausable.sol';
-import 'openzeppelin-solidity/contracts/ownership/Ownable.sol';
 import 'openzeppelin-solidity/contracts/access/Whitelist.sol';
 
 
-contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
+contract FanCrowdsale is Pausable, Whitelist {
   using SafeMath for uint256;
   using AddressUtils for address;
 
@@ -17,7 +16,7 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
   uint256 constant Coin = 1 ether;
 
   // token
-  FAN public token;
+  MintableERC20 public mintableToken;
 
   // wallet to hold funds
   address public wallet;
@@ -74,10 +73,9 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
   }
   // ======
 
-  // Token Cap/Goal
+  // Token Cap
   // =============================
   uint256 public totalTokensForSale; // = 424000000 * Coin; // tokens be sold in Crowdsale
-  uint256 public goalInToken;        // min token to sale
   // ==============================
 
   // Finalize
@@ -116,21 +114,15 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
     // require(_startTime > block.timestamp, "startTime must be in future");
     require(_endTime > _startTime, "endTime must be greater than startTime");
 
-    // make sure this crowdsale contract has ability to mint
-    // make sure token's mint authority has me
-    // yet fan token contract doesn't expose a public check func
-    // must manually make sure crowdsale contract address is added
-    // to authorities of token contract
-    // require(_token.controller() == address(this));
-
-    token  = FAN(_token);
+    // make sure this crowdsale contract has ability to mint or make sure token's mint authority has me
+    // yet fan token contract doesn't expose a public check func must manually make sure crowdsale contract address is added to authorities of token contract
+    mintableToken  = MintableERC20(_token);
     wallet = _wallet;
 
     openingTime = _startTime;
     closingTime = _endTime;
 
     totalTokensForSale  = _cap;
-    goalInToken = 0; // we don't need that feature, so give it 0 to override
 
     _initStages();
     _setCrowdsaleStage(0);
@@ -154,19 +146,19 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
 
   function _initStages() internal {
     // production setting
-    // stages[0] = Stage(25000000 * Coin, 12500 * Coin);
-    // stages[1] = Stage(46000000 * Coin, 11500 * Coin);
-    // stages[2] = Stage(88000000 * Coin, 11000 * Coin);
-    // stages[3] = Stage(105000000 * Coin, 10500 * Coin);
-    // stages[4] = Stage(160000000 * Coin, 10000 * Coin);
+    // stages[0] = Stage(25000000 * Coin, 12500);
+    // stages[1] = Stage(46000000 * Coin, 11500);
+    // stages[2] = Stage(88000000 * Coin, 11000);
+    // stages[3] = Stage(105000000 * Coin, 10500);
+    // stages[4] = Stage(160000000 * Coin, 10000);
 
     // development setting
     // 0.1 ETH allocation per stage for faster forward test
-    stages[0] = Stage(1250 * Coin, 12500 * Coin);
-    stages[1] = Stage(1150 * Coin, 11500 * Coin);
-    stages[2] = Stage(1100 * Coin, 11000 * Coin);
-    stages[3] = Stage(1050 * Coin, 10500 * Coin);
-    stages[4] = Stage(1000 * Coin, 10000 * Coin);
+    stages[0] = Stage(1250 * Coin, 12500);    // 1 Ether(wei) = 12500 Coin(wei)
+    stages[1] = Stage(1150 * Coin, 11500);
+    stages[2] = Stage(1100 * Coin, 11000);
+    stages[3] = Stage(1050 * Coin, 10500);
+    stages[4] = Stage(1000 * Coin, 10000);
 
     totalStages = 5;
   }
@@ -189,7 +181,7 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
     // double check not to over sell
     require(totalTokensSold < totalTokensForSale);
 
-    uint256 tokensToMint   = _getTokenAmount(_weiAmount);
+    uint256 tokensToMint = _weiAmount.mul(currentRate);
 
     // emit DLog(tokensToMint, 'tokensToMint');
     // emit DLog(totalTokensSold.add(tokensToMint), 'tokensToBeSold');
@@ -199,9 +191,9 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
     uint256 acceptedWei;
 
     // refund excess
-    if (currentStage == totalStages - 1 && totalTokensSold.add(tokensToMint) > totalTokensForSale) {
+    if (currentStage == (totalStages - 1) && totalTokensSold.add(tokensToMint) > totalTokensForSale) {
       saleableTokens = totalTokensForSale - totalTokensSold;
-      acceptedWei = saleableTokens.mul(Coin).div(currentRate);
+      acceptedWei = saleableTokens.div(currentRate);
 
       // emit DLog(saleableTokens, 'last saleableTokens');
       // emit DLog(acceptedWei, 'last acceptedWei');
@@ -219,7 +211,7 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
       } else {
         // cross stage yet within cap
         saleableTokens = stages[currentStage].tokenAllocated.sub(currentStageTokensSold);
-        acceptedWei = saleableTokens.mul(Coin).div(currentRate);
+        acceptedWei = saleableTokens.div(currentRate);
         // emit DLog(acceptedWei, 'acceptedWei');
 
         // buy first stage partial
@@ -261,8 +253,6 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
     require(!isFinalized);
     require(hasClosed());
 
-    // goal will be always reached, skip finalization procedure
-    // _finalization();
     emit Finalized();
 
     isFinalized = true;
@@ -276,153 +266,65 @@ contract FanCrowdsale is Ownable, Pausable, Whitelist, Withdrawable {
 
   /**
    * @dev perform buyTokens action for buyer
-   * @param buyer Address performing the token purchase
-   * @param weiAmount Value in wei involved in the purchase
+   * @param _buyer Address performing the token purchase
+   * @param _weiAmount Value in wei involved in the purchase
    */
-  function _buyTokens(address buyer, uint weiAmount) internal {
+  function _buyTokens(address _buyer, uint _weiAmount) onlyIfWhitelisted(_buyer) internal {
     // emit DLog(weiAmount, '_buyTokens');
-    _preValidatePurchase(buyer, weiAmount);
+    require(_buyer != address(0));
+    require(_weiAmount != 0);
 
-    uint256 tokens = _getTokenAmount(weiAmount);
+    uint256 tokenAmount = _weiAmount.mul(currentRate);
 
-    currentStageWeiRaised = currentStageWeiRaised.add(weiAmount);
-    currentStageTokensSold = currentStageTokensSold.add(tokens);
+    currentStageWeiRaised = currentStageWeiRaised.add(_weiAmount);
+    currentStageTokensSold = currentStageTokensSold.add(tokenAmount);
 
-    totalWeiRaised = totalWeiRaised.add(weiAmount);
-    totalTokensSold = totalTokensSold.add(tokens);
+    totalWeiRaised = totalWeiRaised.add(_weiAmount);
+    totalTokensSold = totalTokensSold.add(tokenAmount);
 
     // mint tokens to buyer's account
-    _processPurchase(buyer, tokens);
-    emit TokenPurchase(
-      buyer,
-      weiAmount,
-      tokens
-    );
+    mintableToken.mint(_buyer, tokenAmount);
 
-    // // update stage stage etc
-    // _updatePurchasingState(buyer, weiAmount);
-    _updatePurchasingState();
+    emit TokenPurchase(_buyer, _weiAmount, tokenAmount);
+
+    // update stage
+    if (currentStageTokensSold >= stages[currentStage].tokenAllocated && currentStage + 1 < totalStages) {
+      _setCrowdsaleStage(currentStage + 1);
+    }
 
     // emit DLog(currentStageTokensSold, 'currentStageTokensSold');
     // emit DLog(stages[currentStage].tokenAllocated, 'currentStageTokenAllocated');
 
     // // move ether to foundation wallet
-    _forwardFunds(weiAmount);
-
-    // check after state
-    // _postValidatePurchase(buyer, weiAmount);
-  }
-
-  /**
-   * @dev Validation of an incoming purchase. Use require statements to revert state when conditions are not met. Use super to concatenate validations.
-   * @param _beneficiary Address performing the token purchase
-   * @param _weiAmount Value in wei involved in the purchase
-   */
-  function _preValidatePurchase(
-    address _beneficiary,
-    uint256 _weiAmount
-  )
-    onlyIfWhitelisted(_beneficiary)
-    view internal
-  {
-    require(_beneficiary != address(0));
-    require(_weiAmount != 0);
-  }
-
-  /**
-   * @dev Validation of an executed purchase. Observe state and use revert statements to undo rollback when valid conditions are not met.
-   * @param _beneficiary Address performing the token purchase
-   * @param _weiAmount Value in wei involved in the purchase
-   */
-  // function _postValidatePurchase(
-  //   address _beneficiary,
-  //   uint256 _weiAmount
-  // )
-  //   view internal
-  // {
-  //   return true;
-  // }
-
-  /**
-   * @dev Source of tokens. Override this method to modify the way in which the crowdsale ultimately gets and sends its tokens.
-   * @param _beneficiary Address performing the token purchase
-   * @param _tokenAmount Number of tokens to be emitted
-   */
-  function _deliverTokens(
-    address _beneficiary,
-    uint256 _tokenAmount
-  )
-    internal
-  {
-    // token.safeTransfer(_beneficiary, _tokenAmount);
-    token.mint(_beneficiary, _tokenAmount);
-  }
-
-  /**
-   * @dev Executed when a purchase has been validated and is ready to be executed. Not necessarily emits/sends tokens.
-   * @param _beneficiary Address receiving the tokens
-   * @param _tokenAmount Number of tokens to be purchased
-   */
-  function _processPurchase(
-    address _beneficiary,
-    uint256 _tokenAmount
-  )
-    internal
-  {
-    _deliverTokens(_beneficiary, _tokenAmount);
-  }
-
-  /**
-   * @dev Override for extensions that require an internal state to check for validity (current user contributions, etc.)
-   * @ param _beneficiary Address receiving the tokens
-   * @ param _weiAmount Value in wei involved in the purchase
-   */
-  function _updatePurchasingState(
-    // address _beneficiary,
-    // uint256 _weiAmount
-  )
-    internal
-  {
-    if (currentStageTokensSold >= stages[currentStage].tokenAllocated && currentStage + 1 < totalStages) {
-      _setCrowdsaleStage(currentStage + 1);
-    }
-  }
-
-  /**
-   * @dev Override to extend the way in which ether is converted to tokens.
-   * @param _weiAmount Value in wei to be converted into tokens
-   * @return Number of tokens that can be purchased with the specified _weiAmount
-   */
-  function _getTokenAmount(uint256 _weiAmount)
-    internal view returns (uint256)
-  {
-    return _weiAmount.mul(currentRate).div(Coin);
-  }
-
-  /**
-   * @dev forward raised eth to wallet
-   */
-  function _forwardFunds(uint _weiAmount) internal {
     wallet.transfer(_weiAmount);
     emit EthTransferred("forwarding funds to wallet");
   }
 
-  /**
-   * @dev perform finalization work, check if crowdsale is successful or not to
-   * determine whether to refund
-   */
-  // function _finalization() internal {
-  //   // goal not reached
-  //   if (totalTokensSold < goalInToken) {
-  //     // we do refund
-  //     _refund();
-  //   }
-  // }
 
-  /**
-   * @dev refund raised eth to contributors
-   */
-  // function _refund() internal {
-  //   // TODO: to be implemented
-  // }
+//////////
+// Safety Methods
+//////////
+
+    /// @notice This method can be used by the controller to extract mistakenly
+    ///  sent tokens to this contract.
+    /// @param _token The address of the token contract that you want to recover
+    ///  set to 0 in case you want to extract ether.
+  function claimTokens(address _token) onlyOwner public {
+      if (_token == 0x0) {
+          owner.transfer(address(this).balance);
+          return;
+      }
+
+      ERC20 token = ERC20(_token);
+      uint balance = token.balanceOf(this);
+      token.transfer(owner, balance);
+
+      emit ClaimedTokens(_token, owner, balance);
+  }
+
+////////////////
+// Events
+////////////////
+
+    event ClaimedTokens(address indexed _token, address indexed _to, uint _amount);
 }
