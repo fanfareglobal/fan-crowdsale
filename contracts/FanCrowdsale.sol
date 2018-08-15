@@ -13,7 +13,7 @@ contract FanCrowdsale is Pausable {
   using AddressUtils for address;
 
   // helper with wei
-  uint256 constant Coin = 1 ether;
+  uint256 constant COIN = 1 ether;
 
   // token
   MintableERC20 public mintableToken;
@@ -62,7 +62,7 @@ contract FanCrowdsale is Pausable {
 
   // Token Cap
   // =============================
-  uint256 public totalTokensForSale; // = 424000000 * Coin; // tokens be sold in Crowdsale
+  uint256 public totalTokensForSale; // = 424000000 * COIN; // tokens be sold in Crowdsale
   // ==============================
 
   // Finalize
@@ -104,6 +104,8 @@ contract FanCrowdsale is Pausable {
 
     _initStages();
     _setCrowdsaleStage(0);
+
+    // TODO: require that the sum of the stages is equal to the totalTokensForSale
   }
   // =============
 
@@ -125,48 +127,44 @@ contract FanCrowdsale is Pausable {
 
     require(_buyer != address(0));
     require(!_buyer.isContract());
+    // onlyIfWhitelisted(_buyer)
+    require(whitelist.whitelist(_buyer));
+
     // double check not to over sell
     require(totalTokensSold < totalTokensForSale);
 
     uint256 tokensToMint = _weiAmount.mul(currentRate);
 
-    // emit DLog(tokensToMint, 'tokensToMint');
-    // emit DLog(totalTokensSold.add(tokensToMint), 'tokensToBeSold');
-
-    // temp var
+    // refund excess
     uint256 saleableTokens;
     uint256 acceptedWei;
-
-    // refund excess
     if (currentStage == (totalStages - 1) && totalTokensSold.add(tokensToMint) > totalTokensForSale) {
       saleableTokens = totalTokensForSale - totalTokensSold;
       acceptedWei = saleableTokens.div(currentRate);
 
-      // emit DLog(saleableTokens, 'last saleableTokens');
-      // emit DLog(acceptedWei, 'last acceptedWei');
+      _buyTokensInCurrentStage(_buyer, acceptedWei, saleableTokens);
 
-      // // buy first stage partial
-      _buyTokens(_buyer, acceptedWei);
-
-      // // return the excess
-      _buyer.transfer(_weiAmount.sub(acceptedWei));
-      emit EthRefunded("Exceed Total Token Distributed: Refund");
+      // return the excess
+      uint256 weiToRefund = _weiAmount.sub(acceptedWei);
+      _buyer.transfer(weiToRefund);
+      emit EthRefunded(_buyer, weiToRefund);
+    } else if (currentStageTokensSold.add(tokensToMint) < stages[currentStage].tokenAllocated) {
+      _buyTokensInCurrentStage(_buyer, _weiAmount, tokensToMint);
     } else {
-      // normal buy
-      if (currentStageTokensSold.add(tokensToMint) <= stages[currentStage].tokenAllocated) {
-        _buyTokens(_buyer, _weiAmount);
-      } else {
-        // cross stage yet within cap
-        saleableTokens = stages[currentStage].tokenAllocated.sub(currentStageTokensSold);
-        acceptedWei = saleableTokens.div(currentRate);
-        // emit DLog(acceptedWei, 'acceptedWei');
+      // cross stage yet within cap
+      saleableTokens = stages[currentStage].tokenAllocated.sub(currentStageTokensSold);
+      acceptedWei = saleableTokens.div(currentRate);
 
-        // buy first stage partial
-        _buyTokens(_buyer, acceptedWei);
+      // buy first stage partial
+      _buyTokensInCurrentStage(_buyer, acceptedWei, saleableTokens);
 
-        // // buy next stage for the rest
-        contribute(_buyer, _weiAmount.sub(acceptedWei));
+      // update stage
+      if (currentStageTokensSold >= stages[currentStage].tokenAllocated && currentStage + 1 < totalStages) {
+        _setCrowdsaleStage(currentStage + 1);
       }
+
+      // buy next stage for the rest
+      contribute(_buyer, _weiAmount.sub(acceptedWei));
     }
   }
 
@@ -229,19 +227,19 @@ contract FanCrowdsale is Pausable {
 
   function _initStages() internal {
     // production setting
-    // stages[0] = Stage(25000000 * Coin, 12500);
-    // stages[1] = Stage(46000000 * Coin, 11500);
-    // stages[2] = Stage(88000000 * Coin, 11000);
-    // stages[3] = Stage(105000000 * Coin, 10500);
-    // stages[4] = Stage(160000000 * Coin, 10000);
+    // stages[0] = Stage(25000000 * COIN, 12500);
+    // stages[1] = Stage(46000000 * COIN, 11500);
+    // stages[2] = Stage(88000000 * COIN, 11000);
+    // stages[3] = Stage(105000000 * COIN, 10500);
+    // stages[4] = Stage(160000000 * COIN, 10000);
 
     // development setting
     // 0.1 ETH allocation per stage for faster forward test
-    stages[0] = Stage(1250 * Coin, 12500);    // 1 Ether(wei) = 12500 Coin(wei)
-    stages[1] = Stage(1150 * Coin, 11500);
-    stages[2] = Stage(1100 * Coin, 11000);
-    stages[3] = Stage(1050 * Coin, 10500);
-    stages[4] = Stage(1000 * Coin, 10000);
+    stages[0] = Stage(1250 * COIN, 12500);    // 1 Ether(wei) = 12500 Coin(wei)
+    stages[1] = Stage(1150 * COIN, 11500);
+    stages[2] = Stage(1100 * COIN, 11000);
+    stages[3] = Stage(1050 * COIN, 10500);
+    stages[4] = Stage(1000 * COIN, 10000);
 
     totalStages = 5;
   }
@@ -253,38 +251,22 @@ contract FanCrowdsale is Pausable {
    * @param _buyer Address performing the token purchase
    * @param _weiAmount Value in wei involved in the purchase
    */
-  function _buyTokens(address _buyer, uint _weiAmount) internal {
-    // onlyIfWhitelisted(_buyer)
-    require(whitelist.whitelist(_buyer));
-
+  function _buyTokensInCurrentStage(address _buyer, uint _weiAmount, uint _tokenAmount) internal {
     // emit DLog(weiAmount, '_buyTokens');
     require(_buyer != address(0));
     require(_weiAmount != 0);
 
-    uint256 tokenAmount = _weiAmount.mul(currentRate);
-
     currentStageWeiRaised = currentStageWeiRaised.add(_weiAmount);
-    currentStageTokensSold = currentStageTokensSold.add(tokenAmount);
+    currentStageTokensSold = currentStageTokensSold.add(_tokenAmount);
 
     totalWeiRaised = totalWeiRaised.add(_weiAmount);
-    totalTokensSold = totalTokensSold.add(tokenAmount);
+    totalTokensSold = totalTokensSold.add(_tokenAmount);
 
     // mint tokens to buyer's account
-    mintableToken.mint(_buyer, tokenAmount);
-
-    emit TokenPurchase(_buyer, _weiAmount, tokenAmount);
-
-    // update stage
-    if (currentStageTokensSold >= stages[currentStage].tokenAllocated && currentStage + 1 < totalStages) {
-      _setCrowdsaleStage(currentStage + 1);
-    }
-
-    // emit DLog(currentStageTokensSold, 'currentStageTokensSold');
-    // emit DLog(stages[currentStage].tokenAllocated, 'currentStageTokenAllocated');
-
-    // // move ether to foundation wallet
+    mintableToken.mint(_buyer, _tokenAmount);
     wallet.transfer(_weiAmount);
-    emit EthTransferred("forwarding funds to wallet");
+
+    emit TokenPurchase(_buyer, _weiAmount, _tokenAmount);
   }
 
 
@@ -312,14 +294,8 @@ contract FanCrowdsale is Pausable {
 ////////////////
 // Events
 ////////////////
-  event EthTransferred(string text);
-  event EthRefunded(string text);
-  /**
-   * Event for token purchase logging
-   * @param purchaser who paid for the tokens
-   * @param value weis paid for purchase
-   * @param amount amount of tokens purchased
-   */
+  event EthRefunded(address indexed buyer, uint256 value);
+
   event TokenPurchase(address indexed purchaser, uint256 value, uint256 amount);
 
   event WhitelistTransferred(address indexed previousWhitelist, address indexed newWhitelist);
@@ -327,7 +303,6 @@ contract FanCrowdsale is Pausable {
   event ClaimedTokens(address indexed _token, address indexed _to, uint _amount);
 
   event Finalized();
-  // ==============================
 
   // debug log event
   event DLog(uint num, string msg);
