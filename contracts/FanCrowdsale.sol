@@ -31,19 +31,13 @@ contract FanCrowdsale is Pausable {
   }
 
   uint8 public currentStage;
-  uint256 public currentRate;
   mapping (uint8 => Stage) public stages;
   uint8 public totalStages; //stages count
-  event StageUp(uint8 stageId);
-  // =============
 
   // Amount raised
   // ==================
   uint256 public totalTokensSold;
   uint256 public totalWeiRaised;
-  uint256 public currentStageTokensSold;
-  uint256 public currentStageWeiRaised;
-  // ===================
 
   // timed
   // ======
@@ -54,16 +48,13 @@ contract FanCrowdsale is Pausable {
    * @dev Reverts if not in crowdsale time range.
    */
   modifier onlyWhileOpen {
-    // solium-disable-next-line security/no-block-members
-    require(block.timestamp >= openingTime && block.timestamp <= closingTime && totalTokensSold < totalTokensForSale);
+    require(block.timestamp >= openingTime && !hasClosed());
     _;
   }
-  // ======
 
   // Token Cap
   // =============================
   uint256 public totalTokensForSale; // = 424000000 * COIN; // tokens be sold in Crowdsale
-  // ==============================
 
   // Finalize
   // =============================
@@ -105,7 +96,9 @@ contract FanCrowdsale is Pausable {
     _initStages();
     _setCrowdsaleStage(0);
 
-    // TODO: require that the sum of the stages is equal to the totalTokensForSale
+    // require that the sum of the stages is equal to the totalTokensForSale, _cap is for double check
+    require(stages[totalStages - 1].tokenAllocated == totalTokensForSale);
+    
   }
   // =============
 
@@ -121,18 +114,14 @@ contract FanCrowdsale is Pausable {
    * because we credit tokens back it might trigger problem, eg, from exchange withdraw contract
    */
   function contribute(address _buyer, uint256 _weiAmount) public payable whenNotPaused onlyWhileOpen {
-    // emit DLog(_weiAmount, 'contribute');
-    // emit DLog(currentStage, 'currentStage');
-    // emit DLog(currentStageTokensSold, 'currentStageTokensSold');
-
     require(_buyer != address(0));
     require(!_buyer.isContract());
-    // onlyIfWhitelisted(_buyer)
     require(whitelist.whitelist(_buyer));
 
     // double check not to over sell
     require(totalTokensSold < totalTokensForSale);
 
+    uint currentRate = stages[currentStage].rate;
     uint256 tokensToMint = _weiAmount.mul(currentRate);
 
     // refund excess
@@ -148,18 +137,18 @@ contract FanCrowdsale is Pausable {
       uint256 weiToRefund = _weiAmount.sub(acceptedWei);
       _buyer.transfer(weiToRefund);
       emit EthRefunded(_buyer, weiToRefund);
-    } else if (currentStageTokensSold.add(tokensToMint) < stages[currentStage].tokenAllocated) {
+    } else if (totalTokensSold.add(tokensToMint) < stages[currentStage].tokenAllocated) {
       _buyTokensInCurrentStage(_buyer, _weiAmount, tokensToMint);
     } else {
       // cross stage yet within cap
-      saleableTokens = stages[currentStage].tokenAllocated.sub(currentStageTokensSold);
+      saleableTokens = stages[currentStage].tokenAllocated.sub(totalTokensSold);
       acceptedWei = saleableTokens.div(currentRate);
 
       // buy first stage partial
       _buyTokensInCurrentStage(_buyer, acceptedWei, saleableTokens);
 
       // update stage
-      if (currentStageTokensSold >= stages[currentStage].tokenAllocated && currentStage + 1 < totalStages) {
+      if (totalTokensSold >= stages[currentStage].tokenAllocated && currentStage + 1 < totalStages) {
         _setCrowdsaleStage(currentStage + 1);
       }
 
@@ -203,7 +192,6 @@ contract FanCrowdsale is Pausable {
 
     isFinalized = true;
   }
-  // ===============================
 
 
   // -----------------------------------------
@@ -217,10 +205,6 @@ contract FanCrowdsale is Pausable {
     require(_stageId >= 0 && _stageId < totalStages);
 
     currentStage = _stageId;
-    currentRate  = stages[_stageId].rate;
-
-    currentStageWeiRaised  = 0;
-    currentStageTokensSold = 0;
 
     emit StageUp(_stageId);
   }
@@ -228,23 +212,21 @@ contract FanCrowdsale is Pausable {
   function _initStages() internal {
     // production setting
     // stages[0] = Stage(25000000 * COIN, 12500);
-    // stages[1] = Stage(46000000 * COIN, 11500);
-    // stages[2] = Stage(88000000 * COIN, 11000);
-    // stages[3] = Stage(105000000 * COIN, 10500);
-    // stages[4] = Stage(160000000 * COIN, 10000);
+    // stages[1] = Stage(stages[0].tokenAllocated + 46000000 * COIN, 11500);
+    // stages[2] = Stage(stages[1].tokenAllocated + 88000000 * COIN, 11000);
+    // stages[3] = Stage(stages[2].tokenAllocated + 105000000 * COIN, 10500);
+    // stages[4] = Stage(stages[3].tokenAllocated + 160000000 * COIN, 10000);
 
     // development setting
     // 0.1 ETH allocation per stage for faster forward test
-    stages[0] = Stage(1250 * COIN, 12500);    // 1 Ether(wei) = 12500 Coin(wei)
-    stages[1] = Stage(1150 * COIN, 11500);
-    stages[2] = Stage(1100 * COIN, 11000);
-    stages[3] = Stage(1050 * COIN, 10500);
-    stages[4] = Stage(1000 * COIN, 10000);
+    stages[0] = Stage(1250 * COIN,                            12500);    // 1 Ether(wei) = 12500 Coin(wei)
+    stages[1] = Stage(stages[0].tokenAllocated + 1150 * COIN, 11500);
+    stages[2] = Stage(stages[1].tokenAllocated + 1100 * COIN, 11000);
+    stages[3] = Stage(stages[2].tokenAllocated + 1050 * COIN, 10500);
+    stages[4] = Stage(stages[3].tokenAllocated + 1000 * COIN, 10000);
 
     totalStages = 5;
   }
-
-  // ================ Stage Management Over =====================
 
   /**
    * @dev perform buyTokens action for buyer
@@ -255,9 +237,6 @@ contract FanCrowdsale is Pausable {
     // emit DLog(weiAmount, '_buyTokens');
     require(_buyer != address(0));
     require(_weiAmount != 0);
-
-    currentStageWeiRaised = currentStageWeiRaised.add(_weiAmount);
-    currentStageTokensSold = currentStageTokensSold.add(_tokenAmount);
 
     totalWeiRaised = totalWeiRaised.add(_weiAmount);
     totalTokensSold = totalTokensSold.add(_tokenAmount);
@@ -294,6 +273,8 @@ contract FanCrowdsale is Pausable {
 ////////////////
 // Events
 ////////////////
+  event StageUp(uint8 stageId);
+
   event EthRefunded(address indexed buyer, uint256 value);
 
   event TokenPurchase(address indexed purchaser, uint256 value, uint256 amount);
