@@ -8,7 +8,7 @@ import 'openzeppelin-solidity/contracts/lifecycle/Pausable.sol';
 import 'openzeppelin-solidity/contracts/access/Whitelist.sol';
 
 
-contract FanCrowdsale is Pausable, Whitelist {
+contract FanCrowdsale is Pausable {
   using SafeMath for uint256;
   using AddressUtils for address;
 
@@ -20,6 +20,8 @@ contract FanCrowdsale is Pausable, Whitelist {
 
   // wallet to hold funds
   address public wallet;
+
+  Whitelist public whitelist;
 
   // Stage
   // ============
@@ -42,21 +44,6 @@ contract FanCrowdsale is Pausable, Whitelist {
   uint256 public currentStageTokensSold;
   uint256 public currentStageWeiRaised;
   // ===================
-
-  // Events
-  event EthTransferred(string text);
-  event EthRefunded(string text);
-  /**
-   * Event for token purchase logging
-   * @param purchaser who paid for the tokens
-   * @param value weis paid for purchase
-   * @param amount amount of tokens purchased
-   */
-  event TokenPurchase(
-    address indexed purchaser,
-    uint256 value,
-    uint256 amount
-  );
 
   // timed
   // ======
@@ -81,11 +68,6 @@ contract FanCrowdsale is Pausable, Whitelist {
   // Finalize
   // =============================
   bool public isFinalized = false;
-  event Finalized();
-  // ==============================
-
-  // debug log event
-  event DLog(uint num, string msg);
 
 
   // Constructor
@@ -129,42 +111,11 @@ contract FanCrowdsale is Pausable, Whitelist {
   }
   // =============
 
-  // Crowdsale Stage Management
-  // =========================================================
-  // Change Crowdsale Stage. Available Options: 0..4
-  function _setCrowdsaleStage(uint8 _stageId) internal {
-    require(_stageId >= 0 && _stageId < totalStages);
-
-    currentStage = _stageId;
-    currentRate  = stages[_stageId].rate;
-
-    currentStageWeiRaised  = 0;
-    currentStageTokensSold = 0;
-
-    emit StageUp(_stageId);
+  // fallback
+  function () external payable {
+    contribute(msg.sender, msg.value);
   }
-
-  function _initStages() internal {
-    // production setting
-    // stages[0] = Stage(25000000 * Coin, 12500);
-    // stages[1] = Stage(46000000 * Coin, 11500);
-    // stages[2] = Stage(88000000 * Coin, 11000);
-    // stages[3] = Stage(105000000 * Coin, 10500);
-    // stages[4] = Stage(160000000 * Coin, 10000);
-
-    // development setting
-    // 0.1 ETH allocation per stage for faster forward test
-    stages[0] = Stage(1250 * Coin, 12500);    // 1 Ether(wei) = 12500 Coin(wei)
-    stages[1] = Stage(1150 * Coin, 11500);
-    stages[2] = Stage(1100 * Coin, 11000);
-    stages[3] = Stage(1050 * Coin, 10500);
-    stages[4] = Stage(1000 * Coin, 10000);
-
-    totalStages = 5;
-  }
-
-  // ================ Stage Management Over =====================
-
+  
   // Token Purchase
   // =========================
   /**
@@ -223,9 +174,10 @@ contract FanCrowdsale is Pausable, Whitelist {
     }
   }
 
-  // fallback
-  function () external payable {
-    contribute(msg.sender, msg.value);
+  function changeWhitelist(address _newWhitelist) public onlyOwner {
+    require(_newWhitelist != address(0));
+    emit WhitelistTransferred(whitelist, _newWhitelist);
+    whitelist = Whitelist(_newWhitelist);
   }
 
   /**
@@ -264,12 +216,51 @@ contract FanCrowdsale is Pausable, Whitelist {
   // Internal interface (extensible)
   // -----------------------------------------
 
+  // Crowdsale Stage Management
+  // =========================================================
+  // Change Crowdsale Stage. Available Options: 0..4
+  function _setCrowdsaleStage(uint8 _stageId) internal {
+    require(_stageId >= 0 && _stageId < totalStages);
+
+    currentStage = _stageId;
+    currentRate  = stages[_stageId].rate;
+
+    currentStageWeiRaised  = 0;
+    currentStageTokensSold = 0;
+
+    emit StageUp(_stageId);
+  }
+
+  function _initStages() internal {
+    // production setting
+    // stages[0] = Stage(25000000 * Coin, 12500);
+    // stages[1] = Stage(46000000 * Coin, 11500);
+    // stages[2] = Stage(88000000 * Coin, 11000);
+    // stages[3] = Stage(105000000 * Coin, 10500);
+    // stages[4] = Stage(160000000 * Coin, 10000);
+
+    // development setting
+    // 0.1 ETH allocation per stage for faster forward test
+    stages[0] = Stage(1250 * Coin, 12500);    // 1 Ether(wei) = 12500 Coin(wei)
+    stages[1] = Stage(1150 * Coin, 11500);
+    stages[2] = Stage(1100 * Coin, 11000);
+    stages[3] = Stage(1050 * Coin, 10500);
+    stages[4] = Stage(1000 * Coin, 10000);
+
+    totalStages = 5;
+  }
+
+  // ================ Stage Management Over =====================
+
   /**
    * @dev perform buyTokens action for buyer
    * @param _buyer Address performing the token purchase
    * @param _weiAmount Value in wei involved in the purchase
    */
-  function _buyTokens(address _buyer, uint _weiAmount) onlyIfWhitelisted(_buyer) internal {
+  function _buyTokens(address _buyer, uint _weiAmount) internal {
+    // onlyIfWhitelisted(_buyer)
+    require(whitelist.whitelist(_buyer));
+
     // emit DLog(weiAmount, '_buyTokens');
     require(_buyer != address(0));
     require(_weiAmount != 0);
@@ -325,6 +316,23 @@ contract FanCrowdsale is Pausable, Whitelist {
 ////////////////
 // Events
 ////////////////
+  event EthTransferred(string text);
+  event EthRefunded(string text);
+  /**
+   * Event for token purchase logging
+   * @param purchaser who paid for the tokens
+   * @param value weis paid for purchase
+   * @param amount amount of tokens purchased
+   */
+  event TokenPurchase(address indexed purchaser, uint256 value, uint256 amount);
 
-    event ClaimedTokens(address indexed _token, address indexed _to, uint _amount);
+  event WhitelistTransferred(address indexed previousWhitelist, address indexed newWhitelist);
+
+  event ClaimedTokens(address indexed _token, address indexed _to, uint _amount);
+
+  event Finalized();
+  // ==============================
+
+  // debug log event
+  event DLog(uint num, string msg);
 }
