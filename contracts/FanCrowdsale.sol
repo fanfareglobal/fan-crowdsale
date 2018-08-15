@@ -78,7 +78,6 @@ contract FanCrowdsale is Pausable {
    * @param _startTime start time of crowdscale
    * @param _endTime end time of crowdsale
    * @param _wallet foundation/multi-sig wallet to store raised eth
-   * @param _goal min eth to raise in wei, if goal is not reached, will trigger refund procedure
    * @param _cap max eth to raise in wei
    */
   constructor(
@@ -86,13 +85,10 @@ contract FanCrowdsale is Pausable {
     uint256 _startTime,
     uint256 _endTime,
     address _wallet,
-    uint256 _cap,
-    uint256 _goal) public
+    uint256 _cap) public
   {
     require(_wallet != address(0), "need a good wallet to store fund");
     require(_token != address(0), "token is not deployed?");
-    require(_goal <= _cap, "cap must be greater than goal");
-    require(_goal >= 0, "must have a non-negative goal");
     // require(_startTime > block.timestamp, "startTime must be in future");
     require(_endTime > _startTime, "endTime must be greater than startTime");
 
