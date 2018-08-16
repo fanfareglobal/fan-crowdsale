@@ -223,19 +223,19 @@ contract FanCrowdsale is Pausable {
 
   function _initStages() internal {
     // production setting
-    // stages[0] = Stage(25000000 * COIN, 12500);
-    // stages[1] = Stage(stages[0].tokenAllocated + 46000000 * COIN, 11500);
-    // stages[2] = Stage(stages[1].tokenAllocated + 88000000 * COIN, 11000);
-    // stages[3] = Stage(stages[2].tokenAllocated + 105000000 * COIN, 10500);
-    // stages[4] = Stage(stages[3].tokenAllocated + 160000000 * COIN, 10000);
+    stages[0] = Stage(25000000 * COIN, 12500);
+    stages[1] = Stage(stages[0].tokenAllocated + 46000000 * COIN, 11500);
+    stages[2] = Stage(stages[1].tokenAllocated + 88000000 * COIN, 11000);
+    stages[3] = Stage(stages[2].tokenAllocated + 105000000 * COIN, 10500);
+    stages[4] = Stage(stages[3].tokenAllocated + 160000000 * COIN, 10000);
 
     // development setting
     // 0.1 ETH allocation per stage for faster forward test
-    stages[0] = Stage(1250 * COIN,                            12500);    // 1 Ether(wei) = 12500 Coin(wei)
-    stages[1] = Stage(stages[0].tokenAllocated + 1150 * COIN, 11500);
-    stages[2] = Stage(stages[1].tokenAllocated + 1100 * COIN, 11000);
-    stages[3] = Stage(stages[2].tokenAllocated + 1050 * COIN, 10500);
-    stages[4] = Stage(stages[3].tokenAllocated + 1000 * COIN, 10000);
+    // stages[0] = Stage(1250 * COIN,                            12500);    // 1 Ether(wei) = 12500 Coin(wei)
+    // stages[1] = Stage(stages[0].tokenAllocated + 1150 * COIN, 11500);
+    // stages[2] = Stage(stages[1].tokenAllocated + 1100 * COIN, 11000);
+    // stages[3] = Stage(stages[2].tokenAllocated + 1050 * COIN, 10500);
+    // stages[4] = Stage(stages[3].tokenAllocated + 1000 * COIN, 10000);
 
     totalStages = 5;
   }
